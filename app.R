@@ -6,9 +6,10 @@ library(scales)
 library(DT)
 library(thematic)
 library(shinyWidgets)
+library(plotly)
 thematic_shiny(font = "auto")
 
-data <- read.csv(file = "./data/reexport_nov82023.csv")
+data <- read.csv(file = "./data/reexport_nov82023.csv", fileEncoding="WINDOWS-1250")
 source("./.R/func_clean.R")
 cleaned_data <- clean_data(data)
 current_date <- max(cleaned_data$Gf_Date)
@@ -21,7 +22,7 @@ names_list <- cleaned_data %>%
 `%ni%` <- Negate(`%in%`)
 
 ##dummy_df for status
-status_df <- cleaned_data %>%
+status_df1 <- cleaned_data %>%
   group_by(g_year, Gf_CnBio_ID) %>%
   summarize(total_gift = sum(Gf_Amount)) %>%
   ungroup() %>%
@@ -29,9 +30,10 @@ status_df <- cleaned_data %>%
   left_join(names_list, by = join_by(Gf_CnBio_ID)) %>%
   mutate(comb_id = str_c(Gf_CnBio_ID, g_year)) %>%
   arrange(Gf_CnBio_ID, g_year) %>%
-  mutate(prev = lag(Gf_CnBio_ID)) %>%
+  mutate(prev = lag(Gf_CnBio_ID)) 
+status_df <- status_df1 %>%
   mutate(status = as.factor(case_when(
-    str_c(Gf_CnBio_ID, g_year - 1) %in% status_df$comb_id ~ "Returning",
+    str_c(Gf_CnBio_ID, g_year - 1) %in% status_df1$comb_id ~ "Returning",
     Gf_CnBio_ID == prev ~ "Found",
     .default = "New"
   ))) %>%
@@ -43,16 +45,18 @@ region_df <- cleaned_data %>%
   summarize() %>%
   group_by(Gf_CnBio_ID, g_year) %>%
   summarize(count = n())
-##need to account for members with multiple regions
+##FIXME need to account for members with multiple regions
+
+##sets standardized colors for plots
+status_colors <-setNames(c("#F8766D", "#7CAE00", "#00BFC4", "#C77CFF"), 
+                        c("Found", "New", "Returning", "Non-member"))
 
 ui <- fluidPage(
-  theme = bslib::bs_theme(version = 5, bootswatch = "quartz"),
+  theme = bslib::bs_theme(version = 5, bootswatch = "materia"),
   titlePanel(str_c("BENS Dashboard as of ", current_date)),
+  ##css for columns
+  
   mainPanel(
-    tabsetPanel(
-      type = "pills",
-      tabPanel(
-        "Full Data",
         sidebarLayout(
           sidebarPanel(
             sliderTextInput(
@@ -67,45 +71,72 @@ ui <- fluidPage(
               choices = c(1:12),
               selected =c(1, 12),
               grid = FALSE, dragRange = FALSE),
-            checkboxGroupInput("region1", "Which Region(s)",
+            pickerInput("region1", "Which Region(s)?",
                                choices = levels(cleaned_data$Gf_Gift_code),
-                               selected = levels(cleaned_data$Gf_Gift_code)
-            )
+                               selected = levels(cleaned_data$Gf_Gift_code),
+                        multiple = TRUE, 
+                        options = pickerOptions(
+                          actionsBox = TRUE, 
+                          size = 10, 
+                          selectedTextFormat = "count > 3"
+                        )
+            ), 
+            pickerInput("member1", "Which Club Level?",
+                               choices = c("Chairman's Club", 
+                                           "Vice Chairman's Club",
+                                           "Directors Club",
+                                           "President's Club",
+                                           "Enterprise Club",
+                                           "Executives Club",
+                                           "Investors Club",
+                                           "Non-member"),
+                               selected = c("Chairman's Club", 
+                                            "Vice Chairman's Club",
+                                            "Directors Club",
+                                            "President's Club",
+                                            "Enterprise Club",
+                                            "Executives Club",
+                                            "Investors Club",
+                                            "Non-member"), 
+                        multiple = TRUE, 
+                        options = pickerOptions(
+                          actionsBox = TRUE, 
+                          size = 10, 
+                          selectedTextFormat = "count > 3"
+                        )
+            ), 
+            pickerInput("status1", "Which Status Level?",
+                               choices = c("Found", "New", "Returning", "Non-member"),
+                               selected = levels(status_df$status),
+                        multiple = TRUE, 
+                        options = pickerOptions(
+                          actionsBox = TRUE, 
+                          size = 10, 
+                          selectedTextFormat = "count > 3"
+                        )
+            ),
+            downloadButton('downFile',"Download Table")
           ), ## sidebar panel
           mainPanel(
-            dataTableOutput("full_data")
-          )
-        ) ## sidebar layout
+            tabsetPanel(
+              type = "pills",
+              tabPanel(
+                "Dashboard",
+                mainPanel(
+                  plotlyOutput("barplot"),
+                  plotlyOutput("barplot2")
+                )
+              ), #tab panel 2
+              tabPanel(
+                "Full Data",
+                mainPanel(
+                  dataTableOutput("full_data")
+                )
+              ) #tab panel 2
+          )) #tabset panel first layer main panel
+        )## sidebar layout
         
-      ),
-      tabPanel(
-        "Tab1",
-        sidebarLayout(
-          sidebarPanel(
-            
-          ), ## sidebar panel
-          mainPanel(
-            
-          )
-        ) ## sidebar layout
-      ), ## tab1 panel
-      
-      tabPanel(
-        "Tab2",
-        sidebarLayout(
-          sidebarPanel(
-           
-          ), ## sidebar panel
-          mainPanel(
-            
-          ) ## main panel
-        ) ## sidebar layout
-      ), ## bivariate tab
-      tabPanel(
-        "Tab 3"
       )
-    )
-  )
 ) ## fluid page
 
 
@@ -131,14 +162,19 @@ server <- function(input, output, session) {
         total_gift < 2500 ~ "Non-member"
       ))) -> with_club
     ##appends status
-    final_df <- with_club %>%
+    with_status <- with_club %>%
       left_join(status_df, by = join_by(Gf_CnBio_ID == Gf_CnBio_ID,
                                         g_year == g_year)) %>%
       mutate(status = as.factor(case_when(
         is.na(status) ~ "Non-member",
+        club_level == "Non-member" ~ "Non-member",
         .default = status
       )))
-
+    ##filters bu status and club inputs
+    final_df <- with_status %>%
+      filter(status %in% input$status1) %>%
+      filter(club_level %in% input$member1)
+    
     final_df
   })
   
@@ -149,7 +185,48 @@ server <- function(input, output, session) {
     filter = "top",
     options = list(pageLength = 20)
   )
-
+  output$barplot <- renderPlotly({
+    plot1 <- ggplot(data = grouped_df() %>%
+                      mutate(status = fct_rev(fct_relevel(.f = status, "Returning")))) +
+      geom_bar(aes(x = g_year, fill = status)) +
+      labs(title = "BENS Member Count by Status") +
+      xlab("Year") +
+      ylab("Count of Members") + 
+      scale_x_continuous(breaks=seq(year_min,year_max,2)) +
+      theme(axis.title = element_text(face="bold"), 
+            title = element_text(face="bold"),
+            axis.text.x = element_text(angle = 45, vjust = 1, hjust=1)) +
+      scale_fill_manual(values = status_colors)
+    ggplotly(plot1) %>%
+      layout(height = 400, width = 900)
+  })
+  output$barplot2 <- renderPlotly({
+    plot1 <- ggplot(data = grouped_df() %>%
+                      group_by(status, g_year) %>%
+                      summarize(tot_gift = sum(total_gift)) %>%
+                      mutate(status = fct_rev(fct_relevel(.f = status, "Returning")))) +
+      geom_bar(aes(x = g_year, y = tot_gift, fill = status), stat = "identity") +
+      labs(title = "BENS Annual Gift Amount by Status") +
+      xlab("Year") +
+      ylab("Total Gifts ($USD)") + 
+      scale_x_continuous(breaks=seq(year_min,year_max,2)) +
+      scale_y_continuous(labels = scales::dollar_format()) +
+      theme(axis.title = element_text(face="bold"), 
+            title = element_text(face="bold"),
+            axis.text.x = element_text(angle = 45, vjust = 1, hjust=1)) +
+      scale_fill_manual(values = status_colors)
+    ggplotly(plot1) %>%
+      layout(height = 400, width = 900)
+  })
+  
+  output$downFile <- downloadHandler(
+    filename = paste0("BENS_member_status_", current_date, ".csv") 
+    ,
+    content = function(file) {
+      write.csv(grouped_df(), file, row.names = FALSE)
+    }
+  )
+  
 } # server
 
 shinyApp(ui, server)
