@@ -19,7 +19,6 @@ names_list <- cleaned_data %>%
   select(Gf_CnBio_ID, Gf_CnBio_Name) %>%
   group_by(Gf_CnBio_ID, Gf_CnBio_Name) %>%
   summarize(n_gifts = n())
-`%ni%` <- Negate(`%in%`)
 
 ##dummy_df for status
 status_df1 <- cleaned_data %>%
@@ -55,6 +54,11 @@ ui <- fluidPage(
   theme = bslib::bs_theme(version = 5, bootswatch = "materia"),
   titlePanel(str_c("BENS Dashboard as of ", current_date)),
   ##css for columns
+  
+  fileInput("file1", "PLACEHOLDER FILE UPLOAD",
+            accept = c("text/csv",
+                       "text/comma-separated-values,
+                       .csv")),
   
   mainPanel(
         sidebarLayout(
