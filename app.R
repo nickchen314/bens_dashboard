@@ -7,9 +7,11 @@ library(DT)
 library(thematic)
 library(shinyWidgets)
 library(plotly)
+library(pivottabler)
+library(formattable)
 thematic_shiny(font = "auto")
 
-data <- read.csv(file = "./data/reexport_nov82023.csv", fileEncoding="WINDOWS-1250")
+data <- read.csv(file = "data/reexport_nov82023.CSV", fileEncoding="WINDOWS-1250")
 source("./.R/func_clean.R")
 cleaned_data <- clean_data(data)
 current_date <- max(cleaned_data$Gf_Date)
@@ -130,13 +132,26 @@ ui <- fluidPage(
                   plotlyOutput("barplot"),
                   plotlyOutput("barplot2")
                 )
-              ), #tab panel 2
+              ), 
+              tabPanel(
+                "Summary Table",
+                mainPanel(
+                  dataTableOutput("summary_club"),
+                  dataTableOutput("summary_club_gift")
+                )
+              ), 
+              tabPanel(
+                "Regional Summary",
+                mainPanel(
+                  dataTableOutput("summary_region")
+                )
+              ),#tab panel 3
               tabPanel(
                 "Full Data",
                 mainPanel(
                   dataTableOutput("full_data")
                 )
-              ) #tab panel 2
+              ) #tab panel 4
           )) #tabset panel first layer main panel
         )## sidebar layout
         
@@ -174,7 +189,7 @@ server <- function(input, output, session) {
         club_level == "Non-member" ~ "Non-member",
         .default = status
       )))
-    ##filters bu status and club inputs
+    ##filters by status and club inputs
     final_df <- with_status %>%
       filter(status %in% input$status1) %>%
       filter(club_level %in% input$member1)
@@ -224,12 +239,59 @@ server <- function(input, output, session) {
   })
   
   output$downFile <- downloadHandler(
-    filename = paste0("BENS_member_status_", current_date, ".csv") 
-    ,
+    filename = paste0("BENS_member_status_", current_date, ".csv") ,
     content = function(file) {
       write.csv(grouped_df(), file, row.names = FALSE)
     }
   )
+  
+  output$summary_club <- DT::renderDT(
+    {
+      grouped_df() %>% 
+        group_by(club_level, g_year) %>%
+        summarize(count = n()) %>%
+        mutate(club_level = factor(
+          club_level,
+          levels = c("Chairman's Club", 
+                     "Vice Chairman's Club",
+                     "Directors Club",
+                     "President's Club",
+                     "Enterprise Club",
+                     "Executives Club",
+                     "Investors Club",
+                     "Non-member")
+                                  )) %>%
+        arrange(g_year) %>%
+        pivot_wider(names_from = g_year, values_from = count) %>%
+        arrange(factor(club_level))
+        
+    },
+    options = list(dom='t',ordering=F)
+  )
+  
+  output$summary_club_gift <- DT::renderDT(
+    {
+      grouped_df() %>% 
+        group_by(club_level, g_year) %>%
+        summarize(t_gift = sum(total_gift))%>%
+        mutate(club_level = factor(
+          club_level,
+          levels = c("Chairman's Club", 
+                     "Vice Chairman's Club",
+                     "Directors Club",
+                     "President's Club",
+                     "Enterprise Club",
+                     "Executives Club",
+                     "Investors Club",
+                     "Non-member")
+        )) %>%
+        arrange(g_year) %>%
+        mutate(t_gift = scales::dollar(t_gift)) %>%
+        pivot_wider(names_from = g_year, values_from = t_gift) %>%
+        arrange(factor(club_level))
+    }
+  )
+  
   
 } # server
 
