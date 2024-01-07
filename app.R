@@ -16,15 +16,11 @@ status_colors <-setNames(c("#F8766D", "#7CAE00", "#00BFC4", "#C77CFF"),
 
 ui <- fluidPage(
   theme = bslib::bs_theme(version = 5, bootswatch = "materia"),
-  titlePanel("BENS Dynamic Dashboard"),
-  ##needs dynamic title
-  ##css for columns
-  
+  titlePanel("BENS Dynamic Dashboard - by Nicholas Chen"),
   fileInput("file1", "Upload Dashboard RE Export Here",
             accept = c("text/csv",
                        "text/comma-separated-values,
                        .csv")),
-  
   mainPanel(
         sidebarLayout(
           sidebarPanel(
@@ -83,10 +79,24 @@ ui <- fluidPage(
                 )
               ), 
               tabPanel(
-                "Summary Table",
+                "Line Plots",
+                mainPanel(
+                  plotlyOutput("lineplot_count"),
+                  plotlyOutput("lineplot_region")
+                )
+              ), 
+              tabPanel(
+                "Club Level Summary",
                 mainPanel(
                   dataTableOutput("summary_club"),
                   dataTableOutput("summary_club_gift")
+                )
+              ), 
+              tabPanel(
+                "Regional Summary",
+                mainPanel(
+                  dataTableOutput("summary_region"),
+                  dataTableOutput("summary_region_gift")
                 )
               ), 
               tabPanel(
@@ -234,6 +244,7 @@ server <- function(input, output, session) {
       layout(height = 400, width = 900)
   })
   
+  ## download button
   output$downFile <- downloadHandler(
     filename = paste0("BENS_member_status_", current_date(), ".csv"),
     content = function(file) {
@@ -241,8 +252,47 @@ server <- function(input, output, session) {
     }
   )
   
-  output$summary_club <- DT::renderDT(
-    {
+  ## lineplots
+  output$lineplot_region <- renderPlotly({
+    plot1 <- ggplot(data = grouped_df() %>%
+                      group_by(Gf_Gift_code, g_year) %>%
+                      summarize(tot_gift = sum(total_gift)) %>%
+                      mutate(gift = scales::dollar_format()(round(tot_gift)))) +
+      geom_line(aes(x = g_year, y = tot_gift, color = Gf_Gift_code, label = gift)) + 
+      labs(title = "Annual Gift Amount by Region") +
+      labs(color='Region') +
+      xlab("Year") +
+      ylab("Total Gifts ($USD)") +
+      scale_x_continuous(breaks=seq(year_min(),year_max())) +
+      scale_y_continuous(labels = scales::dollar_format()) +
+      theme(axis.title = element_text(face="bold"),
+          title = element_text(face="bold"),
+          axis.text.x = element_text(angle = 45, vjust = 1, hjust=1)) 
+  
+      ggplotly(plot1, tooltip = c("g_year", "Gf_Gift_code", "label")) %>%
+        layout(height = 400, width = 900)
+  })
+  
+  output$lineplot_count <- renderPlotly({
+    plot1 <- ggplot(data = grouped_df() %>%
+                      group_by(Gf_Gift_code, g_year) %>%
+                      summarize(count = n())) +
+      geom_line(aes(x = g_year, y = count, color = Gf_Gift_code)) + 
+      labs(title = "Member Count by Region") +
+      labs(color='Region') +
+      xlab("Year") +
+      ylab("Count of Members") +
+      scale_x_continuous(breaks=seq(year_min(),year_max())) +
+      theme(axis.title = element_text(face="bold"),
+            title = element_text(face="bold"),
+            axis.text.x = element_text(angle = 45, vjust = 1, hjust=1)) 
+    
+    ggplotly(plot1) %>%
+      layout(height = 400, width = 900)
+  })
+  
+  ## summary tables
+  output$summary_club <- DT::renderDT({
       grouped_df() %>% 
         group_by(club_level, g_year) %>%
         summarize(count = n()) %>%
@@ -263,7 +313,7 @@ server <- function(input, output, session) {
     },
     options = list(dom='t',ordering=F)
   )
-  
+
   output$summary_club_gift <- DT::renderDT({
       grouped_df() %>% 
         group_by(club_level, g_year) %>%
@@ -287,14 +337,24 @@ server <- function(input, output, session) {
     options = list(dom='t',ordering=F)
   )
   
-  output$a <- DT::renderDT({
+  ## regional summary tables
+  output$summary_region_gift <- DT::renderDT({
     grouped_df() %>% 
-      group_by(region, status) %>%
-      summarize(t_gift = sum(total_gift), Found = count(status == "Found"))%>%
+      group_by(Gf_Gift_code, g_year) %>%
+      summarize(t_gift = sum(total_gift))%>%
       arrange(g_year) %>%
       mutate(t_gift = scales::dollar(t_gift)) %>%
-      pivot_wider(names_from = g_year, values_from = t_gift) %>%
-      arrange(factor(club_level))
+      pivot_wider(names_from = g_year, values_from = t_gift) 
+  },
+  options = list(dom='t',ordering=F)
+  )
+  
+  output$summary_region <- DT::renderDT({
+    grouped_df() %>% 
+      group_by(Gf_Gift_code, g_year) %>%
+      summarize(count = n()) %>%
+      arrange(g_year) %>%
+      pivot_wider(names_from = g_year, values_from = count) 
   },
   options = list(dom='t',ordering=F)
   )
