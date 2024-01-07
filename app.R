@@ -7,47 +7,7 @@ library(DT)
 library(thematic)
 library(shinyWidgets)
 library(plotly)
-library(pivottabler)
-library(formattable)
 thematic_shiny(font = "auto")
-
-# data <- read.csv(file = "data/reexport_nov82023.CSV", fileEncoding="WINDOWS-1250")
-source("./.R/func_clean.R")
-# cleaned_data <- clean_data(data)
-# current_date <- max(cleaned_data$Gf_Date)
-# year_min <- min(cleaned_data$g_year)
-# year_max <- max(cleaned_data$g_year)
-# names_list <- cleaned_data %>%
-#   select(Gf_CnBio_ID, Gf_CnBio_Name) %>%
-#   group_by(Gf_CnBio_ID, Gf_CnBio_Name) %>%
-#   summarize(n_gifts = n())
-# 
-# ##dummy_df for status
-# status_df1 <- cleaned_data %>%
-#   group_by(g_year, Gf_CnBio_ID) %>%
-#   summarize(total_gift = sum(Gf_Amount)) %>%
-#   ungroup() %>%
-#   filter(total_gift >= 2500) %>%
-#   left_join(names_list, by = join_by(Gf_CnBio_ID)) %>%
-#   mutate(comb_id = str_c(Gf_CnBio_ID, g_year)) %>%
-#   arrange(Gf_CnBio_ID, g_year) %>%
-#   mutate(prev = lag(Gf_CnBio_ID)) 
-# status_df <- status_df1 %>%
-#   mutate(status = as.factor(case_when(
-#     str_c(Gf_CnBio_ID, g_year - 1) %in% status_df1$comb_id ~ "Returning",
-#     Gf_CnBio_ID == prev ~ "Found",
-#     .default = "New"
-#   ))) %>%
-#   select(g_year, Gf_CnBio_ID, status)
-# 
-# ## dummy df for region
-# region_df <- cleaned_data %>%
-#   group_by(Gf_CnBio_ID, Gf_Gift_code, g_year) %>%
-#   summarize() %>%
-#   group_by(Gf_CnBio_ID, g_year) %>%
-#   summarize(count = n())
-##FIXME need to account for members with multiple regions
-
 source("./.R/func_clean.R")
 
 ##sets standardized colors for plots
@@ -56,7 +16,8 @@ status_colors <-setNames(c("#F8766D", "#7CAE00", "#00BFC4", "#C77CFF"),
 
 ui <- fluidPage(
   theme = bslib::bs_theme(version = 5, bootswatch = "materia"),
-  titlePanel(str_c("BENS Dashboard as of ", 2023)),
+  titlePanel("BENS Dynamic Dashboard"),
+  ##needs dynamic title
   ##css for columns
   
   fileInput("file1", "Upload Dashboard RE Export Here",
@@ -74,30 +35,7 @@ ui <- fluidPage(
               choices = c(1:12),
               selected =c(1, 12),
               grid = FALSE, dragRange = FALSE),
-            pickerInput("region1", "Which Region(s)?",
-                               choices = c("BOS",
-                                           "CA", 
-                                           "CHI", 
-                                           "DC/MD/VA", 
-                                           "NY/NJ/CT", 
-                                           "Other",
-                                           "SE", 
-                                           "TX"),
-                               selected = c("BOS",
-                                            "CA", 
-                                            "CHI", 
-                                            "DC/MD/VA", 
-                                            "NY/NJ/CT", 
-                                            "Other",
-                                            "SE", 
-                                            "TX"),
-                        multiple = TRUE, 
-                        options = pickerOptions(
-                          actionsBox = TRUE, 
-                          size = 10, 
-                          selectedTextFormat = "count > 3"
-                        )
-            ), 
+            uiOutput("region_select"),
             pickerInput("member1", "Which Club Level?",
                                choices = c("Chairman's Club", 
                                            "Vice Chairman's Club",
@@ -152,12 +90,6 @@ ui <- fluidPage(
                 )
               ), 
               tabPanel(
-                "Regional Summary",
-                mainPanel(
-                  dataTableOutput("summary_region")
-                )
-              ),#tab panel 3
-              tabPanel(
                 "Full Data",
                 mainPanel(
                   dataTableOutput("full_data")
@@ -172,13 +104,13 @@ ui <- fluidPage(
 
 server <- function(input, output, session) {
   ## loads data in from file input section
-  cleaned_data <- reactive({clean_data(read.csv(file = req(input$file1$datapath), fileEncoding="WINDOWS-1250"))-> df1
-                           df1})
+  cleaned_data <- reactive({clean_data(read.csv(file = req(input$file1$datapath), fileEncoding="WINDOWS-1250"))})
   ## calls clean data function
   current_date <- reactive({max(cleaned_data()$Gf_Date)})
   ## creates values for year slider
   year_min <- reactive({min(cleaned_data()$g_year)})
   year_max <- reactive({max(cleaned_data()$g_year)})
+  
   ## creates names dataframe to append to cleaned status 
   names_list <- reactive({cleaned_data() %>%
     select(Gf_CnBio_ID, Gf_CnBio_Name) %>%
@@ -207,16 +139,23 @@ server <- function(input, output, session) {
     select(g_year, Gf_CnBio_ID, status) -> df1
     df1})
   
+  ## dummy_df for region
+  region_df <- reactive({cleaned_data() %>%
+      group_by(g_year, Gf_CnBio_ID) %>%
+      arrange(g_year, Gf_CnBio_ID, Gf_Date) %>%
+      mutate(Gf_Gift_code = last(Gf_Gift_code)) %>%
+      group_by(g_year, Gf_CnBio_ID, Gf_Gift_code) %>%
+      summarize()})
+  
   ## creates final df
   grouped_df <- reactive({
     cleaned_data() %>%
       filter(g_year %in% c(input$year1[1]:input$year1[2]), 
                           g_month %in% c(input$month1[1]:input$month1[2])) %>%
-      filter(Gf_Gift_code %in% input$region1) %>%
       group_by(g_year, Gf_CnBio_ID) %>%
       summarize(total_gift = sum(Gf_Amount)) %>%
       left_join(names_list(), by = join_by(Gf_CnBio_ID))-> temp
-    ## appends club level
+    # appends club level
     temp %>%
       mutate(club_level = as.factor(case_when(
         total_gift >= 100000 ~ "Chairman's Club",
@@ -228,7 +167,7 @@ server <- function(input, output, session) {
         total_gift >= 2500 ~ "Investors Club",
         total_gift < 2500 ~ "Non-member"
       ))) -> with_club
-    ##appends status
+    # appends status
     with_status <- with_club %>%
       left_join(status_df(), by = join_by(Gf_CnBio_ID == Gf_CnBio_ID,
                                         g_year == g_year)) %>%
@@ -237,10 +176,17 @@ server <- function(input, output, session) {
         club_level == "Non-member" ~ "Non-member",
         .default = status
       )))
-    ##filters by status and club inputs
-    final_df <- with_status %>%
+    
+    # appends region
+    with_region <- with_status %>%
+      left_join(region_df(), by = join_by(Gf_CnBio_ID == Gf_CnBio_ID,
+                                          g_year == g_year)) 
+   
+    # filters by status, region, and club inputs
+    final_df <- with_region %>%
       filter(status %in% input$status1) %>%
-      filter(club_level %in% input$member1)
+      filter(club_level %in% input$member1) %>% 
+      filter(Gf_Gift_code %in% input$region1) 
     
     final_df
   })
@@ -271,8 +217,9 @@ server <- function(input, output, session) {
     plot1 <- ggplot(data = grouped_df() %>%
                       group_by(status, g_year) %>%
                       summarize(tot_gift = sum(total_gift)) %>%
-                      mutate(status = fct_rev(fct_relevel(.f = status, "Returning")))) +
-      geom_bar(aes(x = g_year, y = tot_gift, fill = status), stat = "identity") +
+                      mutate(status = fct_rev(fct_relevel(.f = status, "Returning"))) %>%
+                      mutate(gift = scales::dollar_format()(round(tot_gift)))) +
+      geom_bar(aes(x = g_year, y = tot_gift, fill = status, text = paste("Gift($):", gift)), stat = "identity") +
       labs(title = "BENS Annual Gift Amount by Status") +
       xlab("Year") +
       ylab("Total Gifts ($USD)") + 
@@ -282,14 +229,15 @@ server <- function(input, output, session) {
             title = element_text(face="bold"),
             axis.text.x = element_text(angle = 45, vjust = 1, hjust=1)) +
       scale_fill_manual(values = status_colors)
-    ggplotly(plot1) %>%
+    
+    ggplotly(plot1, tooltip = c("g_year", "status", "text")) %>%
       layout(height = 400, width = 900)
   })
   
   output$downFile <- downloadHandler(
-    filename = paste0("BENS_member_status_", current_date(), ".csv") ,
+    filename = paste0("BENS_member_status_", current_date(), ".csv"),
     content = function(file) {
-      write.csv(grouped_df(), file, row.names = FALSE)
+      write.csv(req(grouped_df()), file, row.names = FALSE)
     }
   )
   
@@ -307,8 +255,7 @@ server <- function(input, output, session) {
                      "Enterprise Club",
                      "Executives Club",
                      "Investors Club",
-                     "Non-member")
-                                  )) %>%
+                     "Non-member"))) %>%
         arrange(g_year) %>%
         pivot_wider(names_from = g_year, values_from = count) %>%
         arrange(factor(club_level))
@@ -317,8 +264,7 @@ server <- function(input, output, session) {
     options = list(dom='t',ordering=F)
   )
   
-  output$summary_club_gift <- DT::renderDT(
-    {
+  output$summary_club_gift <- DT::renderDT({
       grouped_df() %>% 
         group_by(club_level, g_year) %>%
         summarize(t_gift = sum(total_gift))%>%
@@ -341,7 +287,19 @@ server <- function(input, output, session) {
     options = list(dom='t',ordering=F)
   )
   
-  ## interactive inputs
+  output$a <- DT::renderDT({
+    grouped_df() %>% 
+      group_by(region, status) %>%
+      summarize(t_gift = sum(total_gift), Found = count(status == "Found"))%>%
+      arrange(g_year) %>%
+      mutate(t_gift = scales::dollar(t_gift)) %>%
+      pivot_wider(names_from = g_year, values_from = t_gift) %>%
+      arrange(factor(club_level))
+  },
+  options = list(dom='t',ordering=F)
+  )
+  
+  ## dynamic inputs
   output$year_select <- renderUI({sliderTextInput(
     inputId = "year1",
     label = "Year Select",
@@ -349,6 +307,14 @@ server <- function(input, output, session) {
     selected =c(year_min(), year_max()),
     grid = FALSE, dragRange = FALSE)})
   
+  output$region_select <- renderUI({pickerInput("region1", "Which Region(s)?", 
+                                      choices = levels(cleaned_data()$Gf_Gift_code),
+                                      selected = levels(cleaned_data()$Gf_Gift_code),
+                                      multiple = TRUE, 
+                                      options = pickerOptions(
+                                        actionsBox = TRUE, 
+                                        size = 10, 
+                                        selectedTextFormat = "count > 3"))})
   
 } # server
 
